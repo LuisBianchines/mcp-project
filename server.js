@@ -9,6 +9,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
 
+import { initializeValidators, getToolValidator, getPromptValidator } from './validation.js';
+
 // ======= Configuração básica =======
 const PROTOCOL_VERSION = "2025-06-18"; // Versão de protocolo (negociação)
 const ROOTS = [ path.resolve("demo-root") ]; // Raízes coordenadas (não é limite de segurança)
@@ -44,6 +46,8 @@ const prompts = [
     template: "Olá, {{name}}! Bem-vindo ao Servidor MCP de demonstração."
   }
 ];
+
+initializeValidators({ tools, prompts });
 
 // Resources: listamos arquivos legíveis sob ROOTS
 function scanResources() {
@@ -109,10 +113,11 @@ function handleToolsList(id) {
 function handleToolsCall(id, params) {
   const { name, arguments: args } = params ?? {};
   if (name === "calculator_arithmetic") {
-    const { op, a, b } = args ?? {};
-    if (typeof a !== "number" || typeof b !== "number") {
-      return error(id, -32602, "Parâmetros inválidos", { expected: "numbers a,b" });
+    const validator = getToolValidator(name);
+    if (validator && !validator(args ?? {})) {
+      return error(id, -32602, "Parâmetros inválidos", { errors: validator.errors ?? [] });
     }
+    const { op, a, b } = args ?? {};
     let value;
     switch (op) {
       case "add": value = a + b; break;
@@ -166,8 +171,9 @@ function handlePromptsGet(id, params) {
   if (!prompt) return error(id, -32601, `Prompt não encontrado: ${name}`);
 
   const vars = params?.arguments ?? {};
-  if (prompt.inputSchema?.required?.some(k => !(k in vars))) {
-    return error(id, -32602, "Argumentos ausentes para o prompt", { required: prompt.inputSchema.required });
+  const validator = getPromptValidator(name);
+  if (validator && !validator(vars)) {
+    return error(id, -32602, "Argumentos inválidos para o prompt", { errors: validator.errors ?? [] });
   }
   const rendered = prompt.template.replace(/\{\{(\w+)\}\}/g, (_, k) => String(vars[k] ?? ""));
   reply(id, {
